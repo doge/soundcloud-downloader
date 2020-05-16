@@ -14,9 +14,7 @@ class SoundCloudDownloader:
         self.data = self.__get_song_data().json()
 
     def __scrape_id(self):
-        '''
-            navigates to the given song url and does a regex search for the song id
-         '''
+        ''' navigates to the given song url and does a regex search for the song id '''
         try:
             html = requests.get(self.url).text
             id = re.findall('soundcloud://sounds:(.*?)"', html)[0]
