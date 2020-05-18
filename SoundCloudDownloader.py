@@ -110,7 +110,7 @@ class SoundCloudDownloader:
         resp = self.sess.get(data['media']['transcodings'][1]['url'] + "?client_id=" + self.client_id)
         return self.sess.get(resp.json()['url']).content
 
-    def __tag(self, mp3_file, song_data, song_index):
+    def __tag(self, mp3_file, song_data, song_index=1):
         ''' tags a given mp3 given the data '''
 
         mp3 = eyed3.load(mp3_file)
@@ -150,7 +150,8 @@ class SoundCloudDownloader:
         try:
             song = self.__get_song_mp3(self.data[0])
             file_name = "./songs/" + utils.remove_forbidden_chars(self.data[0]['title']) + ".mp3"
-            self.__write_file(file_name, song, self.data[0])
+            self.__write_file(file_name, song)
+            self.__tag(file_name, self.data[0])
 
             print("[*] \"%s\" downloaded\n" % self.data[0]['title'])
         except Exception as e:
