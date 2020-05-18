@@ -3,6 +3,7 @@ import requests
 import eyed3
 from pathlib import Path
 from bs4 import BeautifulSoup
+import utils
 
 API_V2 = "https://api-v2.soundcloud.com/"
 
@@ -96,6 +97,7 @@ class SoundCloudDownloader:
         ''' writes a file given the file name and the data '''
         with open(file_name, 'wb') as f:
             f.write(data)
+
         self.__tag_mp3(file_name, self.data)
 
     def download_song(self):
@@ -106,7 +108,7 @@ class SoundCloudDownloader:
 
         # get and write song to disk
         song = self.__get_song_mp3(self.data)
-        file_name = "./songs/" + self.data['title'] + ".mp3"
+        file_name = "./songs/" + utils.remove_forbidden_chars(self.data['title']) + ".mp3"
         self.__write_file(file_name, song)
 
     def download_set(self):
@@ -120,7 +122,7 @@ class SoundCloudDownloader:
         Path(file_path).mkdir(parents=True, exist_ok=True)
 
         for track in self.data['tracks']:
-            mp3_path = file_path + "/" + track['title'] + ".mp3"
+            mp3_path = file_path + "/" + utils.remove_forbidden_chars(track['title']) + ".mp3"
 
             print("[~] \"%s\" downloading..." % track['title'])
             try:
