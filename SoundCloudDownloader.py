@@ -12,6 +12,7 @@ API_V2 = "https://api-v2.soundcloud.com/"
 
 class SoundCloudDownloader:
     ''' a soundcloud mp3 downloader '''
+
     def __init__(self, url, client_id=None):
         self.url = url
         self.sess = requests.Session()
@@ -24,10 +25,11 @@ class SoundCloudDownloader:
             print("[*] client id supplied")
             self.client_id = client_id
 
-        self.data = self.__get_data().json()
+        self.data = self.__parse_data()
 
     def __get_song_id(self):
         ''' navigates to the given song url and does a regex search for the song id '''
+
         html = self.sess.get(self.url).text
 
         if self.url_type == "set":
@@ -41,11 +43,12 @@ class SoundCloudDownloader:
 
     def __url_parse(self, url):
         ''' returns "song" or "set" based on if the url is a song or a set '''
+
         parsed = urlparse(url)
 
         # check if the url is from soundcloud
         if parsed.netloc != "soundcloud.com":
-            raise exceptions.InvalidURL("The url is not from SoundCloud.")
+            raise exceptions.InvalidURL("The URL is not from SoundCloud.")
 
         # check if the url is a set or a song and return the result
         items = parsed.path.split("/")
@@ -58,6 +61,7 @@ class SoundCloudDownloader:
 
     def __get_client_id(self):
         ''' grab your soundcloud client id (api key) '''
+
         client_id = None
 
         print("[~] grabbing client id...")
@@ -79,33 +83,49 @@ class SoundCloudDownloader:
 
         return client_id
 
-    def __get_data(self):
-        ''' returns data from the soundcloud api '''
+    def __get_song_data(self, track_id):
+        ''' returns track data from the soundcloud api '''
+
+        data = self.sess.get(API_V2 + "tracks/" + str(track_id) + "?client_id=" + self.client_id)
+        return data.json()
+
+    def __parse_data(self):
+        ''' cleans up and returns song data '''
+
+        track_data = []
         if self.url_type == "set":
-            data = self.sess.get(API_V2 + "playlists/" + self.__get_song_id() + "?client_id=" + self.client_id)
+            set_data = self.sess.get(API_V2 + "playlists/" + self.__get_song_id() + "?client_id=" + self.client_id).json()
+
+            for track in set_data['tracks']:
+                track_data.append(self.__get_song_data(track['id']))
+
+            return [track_data, set_data]
         elif self.url_type == "song":
-            data = self.sess.get(API_V2 + "tracks/" + self.__get_song_id() + "?client_id=" + self.client_id)
-        return data
+            track_data = self.__get_song_data(self.__get_song_id())
+            return [track_data]
 
     def __get_song_mp3(self, data):
         ''' returns the mp3 given the json data '''
+
         resp = self.sess.get(data['media']['transcodings'][1]['url'] + "?client_id=" + self.client_id)
         return self.sess.get(resp.json()['url']).content
 
-    def __tag_mp3(self, mp3_file, data):
+    def __tag(self, mp3_file, song_data, song_index):
         ''' tags a given mp3 given the data '''
+
         mp3 = eyed3.load(mp3_file)
         mp3.initTag()
 
         try:
-            mp3.tag.artist = data['publisher_metadata']['artist']
+            mp3.tag.artist = song_data['publisher_metadata']['artist']
         except KeyError:
-            mp3.tag.artist = data['user']['username']
+            mp3.tag.artist = song_data['user']['username']
 
-        mp3.tag.title = data['title']
+        mp3.tag.title = song_data['title']
+        mp3.tag.track_num = song_index
 
         # set cover art
-        image = self.sess.get(data['artwork_url'].replace('-large', '-t500x500')).content
+        image = self.sess.get(song_data['artwork_url'].replace('-large', '-t500x500')).content
         mp3.tag.images.set(3, image, 'image/jpeg')
 
         mp3.tag.save()
@@ -114,10 +134,9 @@ class SoundCloudDownloader:
 
     def __write_file(self, file_name, data):
         ''' writes a file given the file name and the data '''
+
         with open(file_name, 'wb') as f:
             f.write(data)
-
-        self.__tag_mp3(file_name, self.data)
 
     def download_song(self):
         ''' downloads, saves, and tags a single song '''
@@ -125,41 +144,44 @@ class SoundCloudDownloader:
         # create the songs directory if it doesn't already exist
         Path("./songs").mkdir(parents=True, exist_ok=True)
 
-        print("[~] \"%s\" downloading..." % self.data['title'])
+        print("[~] \"%s\" downloading..." % self.data[0]['title'])
 
         # get and write song to disk
         try:
-            song = self.__get_song_mp3(self.data)
-            file_name = "./songs/" + utils.remove_forbidden_chars(self.data['title']) + ".mp3"
-            self.__write_file(file_name, song)
+            song = self.__get_song_mp3(self.data[0])
+            file_name = "./songs/" + utils.remove_forbidden_chars(self.data[0]['title']) + ".mp3"
+            self.__write_file(file_name, song, self.data[0])
 
-            print("[*] \"%s\" downloaded\n" % self.data['title'])
+            print("[*] \"%s\" downloaded\n" % self.data[0]['title'])
         except Exception as e:
             print(e)
-            print("[*] \"%s\" failed\n" % self.data['title'])
+            print("[*] \"%s\" failed\n" % self.data[0]['title'])
 
     def download_set(self):
         ''' downloads, saves, and tags a set '''
-        file_path = "./songs/" + utils.remove_forbidden_chars(self.data['title'])
+
+        path = "./songs/"
 
         # create the songs directory if it doesn't already exist
-        Path("./songs").mkdir(parents=True, exist_ok=True)
+        Path(path).mkdir(parents=True, exist_ok=True)
 
-        # create the sub folder for the set
-        Path(file_path).mkdir(parents=True, exist_ok=True)
+        # create the set directory
+        path += utils.remove_forbidden_chars(self.data[1]['title']) + "/"
+        Path(path).mkdir(parents=True, exist_ok=True)
 
-        for track in self.data['tracks']:
-            mp3_path = file_path + "/" + utils.remove_forbidden_chars(track['title']) + ".mp3"
-
+        for idx, track in enumerate(self.data[0], start=1):
             print("[~] \"%s\" downloading..." % track['title'])
             try:
+                mp3_name = path + track['title'] + ".mp3"
+
                 # write and tag song
-                self.__write_file(mp3_path, self.__get_song_mp3(track))
+                self.__write_file(mp3_name, self.__get_song_mp3(track))
+                self.__tag(mp3_name, track, idx)
 
                 print("[*] \"%s\" downloaded\n" % track['title'])
             except Exception as e:
                 print(e)
-                print("[*] \"%s\" failed\n" % self.data['title'])
+                print("[*] \"%s\" failed\n" % track['title'])
 
     def download(self):
         if self.url_type == "set":
