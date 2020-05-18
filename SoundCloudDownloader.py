@@ -1,9 +1,11 @@
 import re
-import requests
+import utils
 import eyed3
+import requests
+import exceptions
 from pathlib import Path
 from bs4 import BeautifulSoup
-import utils
+from urllib.parse import urlparse
 
 API_V2 = "https://api-v2.soundcloud.com/"
 
@@ -13,6 +15,7 @@ class SoundCloudDownloader:
     def __init__(self, url, client_id=None):
         self.url = url
         self.sess = requests.Session()
+        self.url_type = self.__url_parse(self.url)
 
         if not client_id:
             print("[*] client id not found")
@@ -25,17 +28,33 @@ class SoundCloudDownloader:
 
     def __get_song_id(self):
         ''' navigates to the given song url and does a regex search for the song id '''
-        try:
-            html = self.sess.get(self.url).text
+        html = self.sess.get(self.url).text
 
-            if "sets" in self.url:
-                id = re.search("soundcloud://playlists:(.*?)\"", html)
-            else:
-                id = re.search("soundcloud://sounds:(.*?)\"", html)
-            return id.group(1)
+        if self.url_type == "set":
+            id = re.search("soundcloud://playlists:(.*?)\"", html)
+        elif self.url_type == "song":
+            id = re.search("soundcloud://sounds:(.*?)\"", html)
+        else:
+            raise exceptions.InvalidSongID("The song id could not be found.")
 
-        except KeyError:
-            print("[*] the song id could not be found")
+        return id.group(1)
+
+    def __url_parse(self, url):
+        ''' returns "song" or "set" based on if the url is a song or a set '''
+        parsed = urlparse(url)
+
+        # check if the url is from soundcloud
+        if parsed.netloc != "soundcloud.com":
+            raise exceptions.InvalidURL("The url is not from SoundCloud.")
+
+        # check if the url is a set or a song and return the result
+        items = parsed.path.split("/")
+        if len(items) == 3 and items[2] != "" and (items[2] != "sets" and items[0] == ''):
+            return "song"
+        elif len(items) == 4 and items[2] != "" and (items[2] == "sets" and items[0] == ''):
+            return "set"
+        else:
+            raise exceptions.InvalidURL("The URL provided is not a song or a set.")
 
     def __get_client_id(self):
         ''' grab your soundcloud client id (api key) '''
@@ -47,6 +66,7 @@ class SoundCloudDownloader:
         soup = BeautifulSoup(resp, "html.parser")
         scripts = soup.find_all("script", crossorigin=True)
 
+        # go to each script on soundcloud and look for the client_id variable
         for script in scripts:
             if "src" in script.attrs:
                 script_text = self.sess.get(script['src']).text
@@ -55,16 +75,15 @@ class SoundCloudDownloader:
                     client_id = str(client_id_search.group(1))
 
                     print("[*] client_id: %s\n" % client_id)
-
                     break
 
         return client_id
 
     def __get_data(self):
         ''' returns data from the soundcloud api '''
-        if "sets" in self.url:
+        if self.url_type == "set":
             data = self.sess.get(API_V2 + "playlists/" + self.__get_song_id() + "?client_id=" + self.client_id)
-        else:
+        elif self.url_type == "song":
             data = self.sess.get(API_V2 + "tracks/" + self.__get_song_id() + "?client_id=" + self.client_id)
         return data
 
@@ -106,14 +125,22 @@ class SoundCloudDownloader:
         # create the songs directory if it doesn't already exist
         Path("./songs").mkdir(parents=True, exist_ok=True)
 
+        print("[~] \"%s\" downloading..." % self.data['title'])
+
         # get and write song to disk
-        song = self.__get_song_mp3(self.data)
-        file_name = "./songs/" + utils.remove_forbidden_chars(self.data['title']) + ".mp3"
-        self.__write_file(file_name, song)
+        try:
+            song = self.__get_song_mp3(self.data)
+            file_name = "./songs/" + utils.remove_forbidden_chars(self.data['title']) + ".mp3"
+            self.__write_file(file_name, song)
+
+            print("[*] \"%s\" downloaded\n" % self.data['title'])
+        except Exception as e:
+            print(e)
+            print("[*] \"%s\" failed\n" % self.data['title'])
 
     def download_set(self):
         ''' downloads, saves, and tags a set '''
-        file_path = "./songs/" + self.data['title']
+        file_path = "./songs/" + utils.remove_forbidden_chars(self.data['title'])
 
         # create the songs directory if it doesn't already exist
         Path("./songs").mkdir(parents=True, exist_ok=True)
@@ -131,11 +158,11 @@ class SoundCloudDownloader:
 
                 print("[*] \"%s\" downloaded\n" % track['title'])
             except Exception as e:
-                print("[*] \"%s\" failed\n" % track['title'])
                 print(e)
+                print("[*] \"%s\" failed\n" % self.data['title'])
 
     def download(self):
-        if "sets" in self.url:
+        if self.url_type == "set":
             self.download_set()
-        else:
+        elif self.url_type == "song":
             self.download_song()
