@@ -173,7 +173,7 @@ class SoundCloudDownloader:
         for idx, track in enumerate(self.data[0], start=1):
             print("[~] \"%s\" downloading..." % track['title'])
             try:
-                mp3_name = path + track['title'] + ".mp3"
+                mp3_name = path + utils.remove_forbidden_chars(track['title']) + ".mp3"
 
                 # write and tag song
                 self.__write_file(mp3_name, self.__get_song_mp3(track))
