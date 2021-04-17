@@ -1,6 +1,9 @@
 # soundcloud-downloader
 download soundcloud mp3s hosted on their cdn
 
+## setup
+`pip install eyed3 requests bs4`
+
 ## usage
 ```
 py download.py -s [link to song or set url] -cid [client id]
